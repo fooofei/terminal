@@ -14,13 +14,24 @@ func init() {
 }
 
 type Terminal struct {
-	Screen  tcell.Screen // the tcell instance
-	stopped *atomic.Bool // marked screen be finished
-	x       int
-	y       int
+	Screen   tcell.Screen // the tcell instance
+	stopped  *atomic.Bool // marked screen be finished
+	x        int
+	y        int
+	finiFunc func()
 }
 
-func New() (*Terminal, error) {
+type Opts func(*Terminal)
+
+// WithOnFinish will set called f when terminal finished
+// f can be called in anther goroutine, must can be thread-safe
+func WithOnFinish(f func()) Opts {
+	return func(terminal *Terminal) {
+		terminal.finiFunc = f
+	}
+}
+
+func New(opts ...Opts) (*Terminal, error) {
 	s, err := tcell.NewScreen()
 	if err != nil {
 		return nil, err
@@ -41,6 +52,9 @@ func New() (*Terminal, error) {
 		stopped: atomic.NewBool(false),
 		x:       0,
 		y:       0,
+	}
+	for _, opt := range opts {
+		opt(t)
 	}
 	go t.pollEvent()
 	return t, nil
@@ -107,6 +121,9 @@ loop:
 			if v.Key() == tcell.KeyEscape || v.Key() == tcell.KeyCtrlC {
 				term.stopped.Store(true)
 				s.Fini()
+				if term.finiFunc != nil {
+					term.finiFunc()
+				}
 				break loop
 			}
 		}
