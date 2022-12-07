@@ -1,4 +1,4 @@
-// package writer wraps the terminal, for simple new instance and write as a io.Writer.
+// Package writer wraps the terminal, for simple new instance and write as a io.Writer.
 package writer
 
 import (
@@ -94,11 +94,21 @@ func (t *Terminal) ForceClearScreen() {
 }
 
 // setContent wraps the screen.SetContent method for put first runes to the head
-func (t *Terminal) setContent(x, y int, runes []rune, style tcell.Style) {
-	if len(runes) <= 0 {
-		return
+func (t *Terminal) setContentXY(x, y int, runeList []rune, style tcell.Style) {
+	var width, _ = t.Screen.Size()
+	for i := len(runeList); i < width; i++ {
+		runeList = append(runeList, ' ')
 	}
-	t.Screen.SetContent(x, y, runes[0], runes[1:], style)
+	t.Screen.SetContent(x, y, runeList[0], runeList[1:], style)
+}
+
+func (t *Terminal) setContent(content []byte) {
+	var y int
+	var tailRuneList, _ = runes.DecodeRuneOnNewLine(content, func(rs []rune) {
+		t.setContentXY(0, y, rs, tcell.StyleDefault)
+		y += 1
+	})
+	t.setContentXY(0, y, tailRuneList, tcell.StyleDefault)
 }
 
 func (t *Terminal) Write(p []byte) (int, error) {
@@ -107,12 +117,7 @@ func (t *Terminal) Write(p []byte) (int, error) {
 	}
 	var n, err = t.screenBuf.Write(p)
 	if n > 0 {
-		var y int
-		var tailRunes, _ = runes.DecodeRuneOnNewLine(t.screenBuf.Bytes(), func(rs []rune) {
-			t.setContent(0, y, rs, tcell.StyleDefault)
-			y += 1
-		})
-		t.setContent(0, y, tailRunes, tcell.StyleDefault)
+		t.setContent(t.screenBuf.Bytes())
 		t.Show()
 	}
 	return n, err
@@ -126,6 +131,17 @@ func (t *Terminal) Sync() {
 	t.Screen.Sync()
 }
 
+func (t *Terminal) GetContent() []byte {
+	return t.screenBuf.Bytes()
+}
+
+// Flush will use buffered content to redraw terminal
+func (t *Terminal) Flush() {
+	t.ForceClearScreen()
+	t.setContent(t.screenBuf.Bytes())
+	t.Show()
+}
+
 func (t *Terminal) pollEvent() {
 	s := t.Screen
 loop:
@@ -137,7 +153,7 @@ loop:
 		}
 		switch v := ev.(type) {
 		case *tcell.EventResize:
-			s.Sync()
+			t.Sync()
 		case *tcell.EventKey:
 			if v.Key() == tcell.KeyEscape || v.Key() == tcell.KeyCtrlC {
 				t.Close()
