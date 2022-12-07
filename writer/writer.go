@@ -2,12 +2,12 @@
 package writer
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/fooofei/terminal/runes"
 	"github.com/gdamore/tcell/v2"
 	"github.com/gdamore/tcell/v2/encoding"
-	"go.uber.org/atomic"
 )
 
 func init() {
@@ -15,11 +15,10 @@ func init() {
 }
 
 type Terminal struct {
-	Screen   tcell.Screen // the tcell instance
-	stopped  *atomic.Bool // marked screen be finished
-	x        int
-	y        int
-	finiFunc func()
+	Screen    tcell.Screen // the tcell instance
+	screenBuf *bytes.Buffer
+	stopped   chan struct{}
+	finiFunc  func()
 }
 
 type Opts func(*Terminal)
@@ -49,10 +48,9 @@ func New(opts ...Opts) (*Terminal, error) {
 	s.SetStyle(defStyle)
 
 	t := &Terminal{
-		Screen:  s,
-		stopped: atomic.NewBool(false),
-		x:       0,
-		y:       0,
+		Screen:    s,
+		screenBuf: bytes.NewBufferString(""),
+		stopped:   make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -61,53 +59,75 @@ func New(opts ...Opts) (*Terminal, error) {
 	return t, nil
 }
 
-func (term *Terminal) Close() error {
-	term.Screen.Fini()
-	term.stopped.Store(true)
-	term.x = 0
-	term.y = 0
+func (t *Terminal) markStopped() {
+	select {
+	case <-t.stopped:
+	default:
+		close(t.stopped)
+	}
+}
+
+func (t *Terminal) isStopped() bool {
+	select {
+	case <-t.stopped:
+		return true
+	default:
+		return false
+	}
+}
+
+func (t *Terminal) Close() error {
+	t.Screen.Fini()
+	t.markStopped()
+	if t.finiFunc != nil {
+		t.finiFunc()
+	}
 	return nil
 }
 
-func (term *Terminal) Clear() {
-	term.x = 0
-	term.y = 0
-	term.Screen.Clear()
+func (t *Terminal) Clear() {
+	t.screenBuf.Reset()
+}
+
+func (t *Terminal) ForceClearScreen() {
+	t.Screen.Clear()
 }
 
 // setContent wraps the screen.SetContent method for put first runes to the head
-func (term *Terminal) setContent(x, y int, runes []rune, style tcell.Style) {
+func (t *Terminal) setContent(x, y int, runes []rune, style tcell.Style) {
 	if len(runes) <= 0 {
 		return
 	}
-	term.Screen.SetContent(x, y, runes[0], runes[1:], style)
+	t.Screen.SetContent(x, y, runes[0], runes[1:], style)
 }
 
-func (term *Terminal) Write(p []byte) (int, error) {
-	if term.stopped.Load() {
-		return 0, fmt.Errorf("terminal screen alreay stopped")
+func (t *Terminal) Write(p []byte) (int, error) {
+	if t.isStopped() {
+		return 0, fmt.Errorf("cannot write anymore, terminal screen alreay stopped")
 	}
-	tailRunes, size := runes.DecodeRuneOnNewLine(p, func(rs []rune) {
-		term.setContent(term.x, term.y, rs, tcell.StyleDefault)
-		term.y += 1
-		term.x = 0
-	})
-	term.setContent(term.x, term.y, tailRunes, tcell.StyleDefault)
-	term.x += len(tailRunes)
-	term.Screen.Show()
-	return size, nil
+	var n, err = t.screenBuf.Write(p)
+	if n > 0 {
+		var y int
+		var tailRunes, _ = runes.DecodeRuneOnNewLine(t.screenBuf.Bytes(), func(rs []rune) {
+			t.setContent(0, y, rs, tcell.StyleDefault)
+			y += 1
+		})
+		t.setContent(0, y, tailRunes, tcell.StyleDefault)
+		t.Show()
+	}
+	return n, err
 }
 
-func (term *Terminal) Show() {
-	term.Screen.Show()
+func (t *Terminal) Show() {
+	t.Screen.Show()
 }
 
-func (term *Terminal) Sync() {
-	term.Screen.Sync()
+func (t *Terminal) Sync() {
+	t.Screen.Sync()
 }
 
-func (term *Terminal) pollEvent() {
-	s := term.Screen
+func (t *Terminal) pollEvent() {
+	s := t.Screen
 loop:
 	for {
 		ev := s.PollEvent()
@@ -120,11 +140,7 @@ loop:
 			s.Sync()
 		case *tcell.EventKey:
 			if v.Key() == tcell.KeyEscape || v.Key() == tcell.KeyCtrlC {
-				term.stopped.Store(true)
-				s.Fini()
-				if term.finiFunc != nil {
-					term.finiFunc()
-				}
+				t.Close()
 				break loop
 			}
 		}

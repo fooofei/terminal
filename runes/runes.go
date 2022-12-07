@@ -21,9 +21,9 @@ func DecodeRune(p []byte) ([]rune, int) {
 	return rn, acceptSize
 }
 
-// DecodeRuneOnNewLine will deocde bytes to runes
+// DecodeRuneOnNewLine will decode bytes to runes
 // call the newLine callback when got a new line runes
-// return tail runes array and the decoded valided size
+// return tail runes array and the decoded valid size
 func DecodeRuneOnNewLine(p []byte, newLine func([]rune)) ([]rune, int) {
 	acceptSize := 0
 	rn := make([]rune, 0)

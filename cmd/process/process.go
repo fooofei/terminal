@@ -13,7 +13,7 @@ func main() {
 	}
 	for i := 0; i < 100; i = i + 10 {
 		// add your text to writer's buffer
-		_, _ = fmt.Fprintf(writer, "Downloading (%d/100) bytes...\n", i)
+		writer.Write(fmt.Appendf(nil, "Downloading (%d/100) bytes...", i))
 		time.Sleep(time.Millisecond * 200)
 
 		// clear the text written by previous write, so that it can be re-written.
