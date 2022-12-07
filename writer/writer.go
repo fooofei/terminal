@@ -93,37 +93,37 @@ func (t *Terminal) ForceClearScreen() {
 	t.Screen.Clear()
 }
 
-// setContent wraps the screen.SetContent method for put first runes to the head
-func (t *Terminal) setContentXY(x, y int, runeList []rune, style tcell.Style) {
+// setContentRow wraps the screen.SetContent method for put runes list
+func (t *Terminal) setContentRow(row int, runeList []rune, style tcell.Style) {
 	var width, _ = t.Screen.Size()
-	for i := len(runeList); i < width; i++ {
-		runeList = append(runeList, ' ')
+	var i = 0
+	for ; i < len(runeList) && i < width; i++ {
+		t.Screen.SetContent(i, row, runeList[i], nil, style)
 	}
-	t.Screen.SetContent(x, y, runeList[0], runeList[1:], style)
+	for ; i < width; i++ {
+		t.Screen.SetContent(i, row, ' ', nil, style)
+	}
 }
 
 func (t *Terminal) setContent(content []byte) {
 	var y int
+	var style = tcell.StyleDefault
 	var tailRuneList, _ = runes.DecodeRuneOnNewLine(content, func(rs []rune) {
-		t.setContentXY(0, y, rs, tcell.StyleDefault)
+		t.setContentRow(y, rs, style)
 		y += 1
 	})
-	t.setContentXY(0, y, tailRuneList, tcell.StyleDefault)
+	t.setContentRow(y, tailRuneList, style)
 }
 
 func (t *Terminal) Write(p []byte) (int, error) {
 	if t.isStopped() {
 		return 0, fmt.Errorf("cannot write anymore, terminal screen alreay stopped")
 	}
-	var n, err = t.screenBuf.Write(p)
-	if n > 0 {
-		t.setContent(t.screenBuf.Bytes())
-		t.Show()
-	}
-	return n, err
+	return t.screenBuf.Write(p)
 }
 
 func (t *Terminal) Show() {
+	t.setContent(t.screenBuf.Bytes())
 	t.Screen.Show()
 }
 
@@ -153,7 +153,7 @@ loop:
 		}
 		switch v := ev.(type) {
 		case *tcell.EventResize:
-			t.Sync()
+			t.Flush()
 		case *tcell.EventKey:
 			if v.Key() == tcell.KeyEscape || v.Key() == tcell.KeyCtrlC {
 				t.Close()
